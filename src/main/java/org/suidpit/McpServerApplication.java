@@ -79,47 +79,66 @@ public class McpServerApplication {
         return activePort;
     }
 
+    private static final Path MCP_DIR = Paths.get(System.getProperty("user.home"), ".ghidra-mcp");
+
     /**
-     * Writes the active port to a PID-specific file in ~/.ghidra-mcp/
+     * Writes MCP client config files to ~/.ghidra-mcp/
+     *
+     * Generated files:
+     *   mcp.json           - latest instance config (symlink target for projects)
+     *   mcp.<port>.json    - per-instance config keyed by port
      */
     private static void writePortFile(int port) {
         try {
-            Path portDir = Paths.get(System.getProperty("user.home"), ".ghidra-mcp");
-            Files.createDirectories(portDir);
+            Files.createDirectories(MCP_DIR);
 
-            long pid = ProcessHandle.current().pid();
-            Path portFile = portDir.resolve("port." + pid);
+            String mcpConfig = "{\n" +
+                    "  \"mcpServers\": {\n" +
+                    "    \"McG\": {\n" +
+                    "      \"type\": \"sse\",\n" +
+                    "      \"url\": \"http://localhost:" + port + "/sse\"\n" +
+                    "    }\n" +
+                    "  }\n" +
+                    "}\n";
 
-            Files.writeString(portFile, String.valueOf(port));
-            Msg.info(McpServerApplication.class, "Port file: " + portFile);
+            Files.writeString(MCP_DIR.resolve("mcp." + port + ".json"), mcpConfig);
+            Files.writeString(MCP_DIR.resolve("mcp.json"), mcpConfig);
+
+            Msg.info(McpServerApplication.class,
+                    "MCP config: " + MCP_DIR.resolve("mcp.json") +
+                    " (symlink this into your project as .mcp.json)");
         } catch (IOException e) {
             Msg.warn(McpServerApplication.class,
-                    "Failed to write port file (server will still run): " + e.getMessage());
+                    "Failed to write config files (server will still run): " + e.getMessage());
         }
     }
 
     /**
-     * Cleans up stale port files from dead processes
+     * Cleans up stale config files by checking if the port is still in use.
+     * If the port is available (no server listening), the config file is stale.
      */
     private static void cleanStalePortFiles() {
         try {
-            Path portDir = Paths.get(System.getProperty("user.home"), ".ghidra-mcp");
-            if (!Files.exists(portDir)) {
+            if (!Files.exists(MCP_DIR)) {
                 return;
             }
 
-            try (Stream<Path> files = Files.list(portDir)) {
-                files.filter(path -> path.getFileName().toString().startsWith("port."))
-                        .forEach(portFile -> {
+            try (Stream<Path> files = Files.list(MCP_DIR)) {
+                files.filter(path -> {
+                            String name = path.getFileName().toString();
+                            return name.startsWith("mcp.") && name.endsWith(".json") && !name.equals("mcp.json");
+                        })
+                        .forEach(file -> {
                             try {
-                                String fileName = portFile.getFileName().toString();
-                                long pid = Long.parseLong(fileName.substring("port.".length()));
+                                String fileName = file.getFileName().toString();
+                                int port = Integer.parseInt(
+                                        fileName.substring("mcp.".length(), fileName.length() - ".json".length()));
 
-                                // Check if process is still alive
-                                if (ProcessHandle.of(pid).isEmpty()) {
-                                    Files.deleteIfExists(portFile);
+                                // If the port is available, no server is listening — file is stale
+                                if (PortResolver.isPortAvailable(port)) {
+                                    Files.deleteIfExists(file);
                                     Msg.info(McpServerApplication.class,
-                                            "Cleaned up stale port file: " + portFile);
+                                            "Cleaned up stale config: " + file);
                                 }
                             } catch (NumberFormatException | IOException e) {
                                 // Ignore malformed or inaccessible files
@@ -128,18 +147,20 @@ public class McpServerApplication {
             }
         } catch (IOException e) {
             Msg.warn(McpServerApplication.class,
-                    "Failed to clean stale port files: " + e.getMessage());
+                    "Failed to clean stale config files: " + e.getMessage());
         }
     }
 
     /**
-     * Deletes the port file for the current process
+     * Deletes config files for the current server instance
      */
     private static void deletePortFile() {
         try {
-            long pid = ProcessHandle.current().pid();
-            Path portFile = Paths.get(System.getProperty("user.home"), ".ghidra-mcp", "port." + pid);
-            Files.deleteIfExists(portFile);
+            Files.deleteIfExists(MCP_DIR.resolve("mcp." + activePort + ".json"));
+            // Only remove mcp.json if we're the last instance
+            if (plugins.isEmpty()) {
+                Files.deleteIfExists(MCP_DIR.resolve("mcp.json"));
+            }
         } catch (IOException e) {
             // Ignore cleanup errors
         }
