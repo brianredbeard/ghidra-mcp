@@ -116,6 +116,57 @@ Or add the config manually:
 
 When running multiple Ghidra instances, per-instance configs are at `~/.ghidra-mcp/mcp.<port>.json`.
 
+## Headless Mode
+
+McG can run without the Ghidra GUI using `analyzeHeadless`. This is useful for server deployments, CI pipelines, and container-based analysis.
+
+### Quick Start
+
+```bash
+export GHIDRA_INSTALL_DIR=/path/to/ghidra
+
+# Install the extension (first time only)
+unzip dist/ghidra_*_ghidra-mcp.zip -d "$GHIDRA_INSTALL_DIR/Ghidra/Extensions/"
+
+# Run headless analysis + start MCP server
+"$GHIDRA_INSTALL_DIR/support/analyzeHeadless" /tmp/mcg-project McG \
+  -import /path/to/binary \
+  -postScript McgServer.java
+```
+
+The server imports the binary, runs Ghidra's full auto-analysis (including DWARF, function detection, and decompiler analysis), then starts the MCP server. It blocks until you send `SIGTERM` (Ctrl+C).
+
+### Connecting
+
+The headless server generates the same `~/.ghidra-mcp/mcp.json` config file as GUI mode. Symlink it into your project:
+
+```bash
+ln -sf ~/.ghidra-mcp/mcp.json .mcp.json
+```
+
+For remote access (e.g., running headless on a server), bind to all interfaces:
+
+```bash
+export GHIDRA_MCP_HOST=0.0.0.0
+```
+
+### Container
+
+Build and run with Podman (or Docker):
+
+```bash
+podman build -t mcg .
+podman run -p 8888:8888 -v ./bins:/data:Z mcg /data/firmware.bin
+```
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GHIDRA_INSTALL_DIR` | (required) | Path to Ghidra installation |
+| `GHIDRA_MCP_PORT` | `8888` | Server port (scans +9 if occupied) |
+| `GHIDRA_MCP_HOST` | `127.0.0.1` | Bind address (`0.0.0.0` for network access) |
+
 ## Configuration
 
 ### Port
