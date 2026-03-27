@@ -219,13 +219,20 @@ jobs:
           git config user.name "Ghidra Release Bot"
           git config user.email "ghidra-release-bot@noreply"
 
+          # Stage changed files first (git pull --rebase refuses unstaged changes)
+          git add .ghidra-version gradle/wrapper/gradle-wrapper.properties gradle/wrapper/gradle-wrapper.jar gradlew gradlew.bat
+          git diff --cached --quiet && { echo "No changes to commit"; exit 0; }
+
+          # Stash staged changes, pull, then unstash
+          git stash
           if ! git pull --rebase origin main; then
+            git stash pop
             echo "Error: Failed to rebase on main. Manual intervention required."
             exit 1
           fi
+          git stash pop
 
           git add .ghidra-version gradle/wrapper/gradle-wrapper.properties gradle/wrapper/gradle-wrapper.jar gradlew gradlew.bat
-          git diff --cached --quiet && { echo "No changes to commit"; exit 0; }
 
           git commit -m "chore: update to Ghidra ${VERSION}
 
